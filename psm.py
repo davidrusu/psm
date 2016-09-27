@@ -2,48 +2,42 @@ from collections import *
 from math import *
 
 num_percepts = 3
-percept_colors = [color(255, 0, 0, 50), color(0, 255, 0, 50), color(0, 0, 255, 50)
-, color(255, 255, 0, 50), color(0, 255, 255, 50)]
+percept_colors = [color(255, 0, 0, 50),
+                  color(0, 255, 0, 50),
+                  color(0, 0, 255, 50),
+                  color(255, 255, 0, 50),
+                  color(0, 255, 255, 50)]
 
 class Node:
     def __init__(self):
         self.percept_visits = [0] * num_percepts
         self.edges = defaultdict(list)
-    
-    def dominant_percept(self):
-        return sorted(enumerate(self.percept_visits), key=lambda x: x[1])[-1][0]
-    
-    def visits(self):
-        return sum(self.percept_visits)
 
-class Point:
-    def __init__(self, index):
-        self.index = index
+        # for visualization
         self.x = random(width)
         self.y = random(height)
         self.vx = 0
         self.vy = 0
-    
+
     def update(self):
         center_k = 0.001
         self.vx += (width / 2 - self.x) * center_k
         self.vy += (height / 2 - self.y) * center_k
         
         for p in range(num_percepts):
-            for j, _ in psm[self.index].edges[p]:
-                p2 = points[j]
-                dx = p2.x - self.x
-                dy = p2.y - self.y
+            for next_node, _ in self.edges[p]:
+                dx = next_node.x - self.x
+                dy = next_node.y - self.y
                 d = max(1, sqrt(dx * dx + dy * dy))
                 nx = dx / d
                 ny = dy / d
                 k = 0.001 * (d - 20)
                 self.vx += k * nx
                 self.vy += k * ny
-                p2.vx -= k * nx
-                p2.vy -= k * ny
-                
-        for j, p in enumerate(points):
+                next_node.vx -= k * nx
+                next_node.vy -= k * ny
+        
+        for j, p in enumerate(psm):
             if j == self.index:
                 continue
             dx = p.x - self.x
@@ -61,19 +55,24 @@ class Point:
         self.vy *= 0.8
         self.x += self.vx
         self.y += self.vy
+
+        
+    def dominant_percept(self):
+        return sorted(enumerate(self.percept_visits), key=lambda x: x[1])[-1][0]
     
+    def visits(self):
+        return sum(self.percept_visits)
+
     def draw(self):
-        node = psm[self.index]
         for p in range(num_percepts):
             c = percept_colors[p]
             stroke(c)
             strokeWeight(1)
-            for i, prob in node.edges[p]:
-                p2 = points[i]
+            for next_node, prob in self.edges[p]:
                 strokeWeight(prob * 10)
-                line(self.x, self.y, p2.x, p2.y)
+                line(self.x, self.y, next_node.x, next_node.y)
                 fill(c)
-                ellipse(self.x + (p2.x - self.x) * 0.75, self.y + (p2.y - self.y) * 0.75, 5, 5)
+                ellipse(self.x + (next_node.x - self.x) * 0.75, self.y + (next_node.y - self.y) * 0.75, 5, 5)
         
         noFill()
         if state == self.index:
@@ -86,11 +85,10 @@ class Point:
         ellipse(self.x, self.y, 20, 20)
         
         fill(0);
-        text(str(node.dominant_percept()), self.x-2, self.y + 5)
+        text(str(self.dominant_percept()), self.x-2, self.y + 5)
 
 psm = [Node()]
 state = 0
-points = []
 
 history = []
 history_states = [] # [(start_state, end_state, percept)] 
@@ -188,21 +186,16 @@ def update():
     if frameCount % t == 0:
         transition(int(frameCount / t) % num_percepts)
     
-    for i, n in enumerate(psm):
-        if len(points) <= i:
-            points.append(Point(index=i))
-    
-    for p in points:
-        p.update()
-        
+    for node in psm:
+        node.update()
+
 
 def draw():
     background(255)
     
     update()
-    
-    for p in points:
-        p.draw()
+    for node in psm:
+        node.draw()
     
     menu()
     
