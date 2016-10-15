@@ -1,7 +1,7 @@
 from collections import *
 from math import *
 
-num_percepts = 3
+num_percepts = 50
 percept_colors = [color(255, 0, 0, 50),
                   color(0, 255, 0, 50),
                   color(0, 0, 255, 50),
@@ -34,53 +34,119 @@ class Vec:
     def norm(self):
         return self * (1 / self.mag(0.0001))
 
+class MC:
+    def __init__(self, states):
+        self.mc = [[[random(1) for _ in range(states)] for _ in range(states)] for _ in range(num_percepts)]
+        self.percept_visits = [[0] * num_percepts for _ in range(states)]
+        self.nodes = [Node() for _ in range(states)]
+        self.history = []
+        self.state = 0
+        [[self.normalize(p, s) for p in range(num_percepts)] for s in range(states)]
+    
+    def normalize(self, p, state):
+        s = self.mc[p][state]
+        total = sum(s)
+        for i, p in enumerate(s):
+            s[i] = p / total
+                
+    def positive(self, p, a, b, amount):
+        self.mc[p][a][b] += amount
+        self.normalize(p, a)
+    
+    def negative(self, p, a, b, amount):
+        for i in range(len(self.mc[p][a])):
+            self.mc[p][a][i] += amount 
+        self.mc[p][a][b] -= amount
+        self.normalize(p, a)
+        
+    def dominant_percept(self, a):
+        return sorted(enumerate(self.percept_visits[a]), key=lambda x: x[1])[-1][0]
+        
+    def transition(self, percept):
+        self.history.append(self.state)
+        self.history = self.history[-100:]
+        bump = 2
+        if len(percept_history) > 1:
+            if self.dominant_percept(self.state) == percept:
+                for i, edge in enumerate(reversed(zip(self.history, self.history[1:]))):
+                    p = percept_history[-(i + 2)]
+                    a, b = edge
+                    self.positive(p, a, b, bump / ((i + 1)**2))
+            else:
+                for i, edge in enumerate(reversed(zip(self.history, self.history[1:]))):
+                    p = percept_history[-(i + 2)]
+                    a, b = edge
+                    self.negative(p, a, b, 0.1 * (bump / len(self.nodes)) / ((i + 1)**2))
+        self.percept_visits[self.state][percept] += 1
+        
+        next_state = self.sample(percept, self.state)
+        self.state = next_state
+        
+    def sample(self, percept, state):
+        rv = random(1)
+        cum_p = 0
+        for next_state, p in sorted(enumerate(self.mc[percept][state]), key=lambda x: x[1], reverse=True):
+            cum_p += p
+            if rv < cum_p:
+                break
+        return next_state
+    
+    def update(self):
+        for i, node in enumerate(self.nodes):
+            if len(percept_history) < 1:
+                continue
+            node.update(self.nodes, self.mc[percept_history[-1]][i])
+        
+        for i in range(len(self.nodes)):
+            a = self.nodes[i]
+            for j in range(i + 1, len(self.nodes)):
+                b = self.nodes[j]
+                delta = b.pos - a.vel
+                force = delta.norm() * (1000 / (delta.mag() ** 2))
+                a.vel = a.vel - force
+                b.vel = b.vel + force
+                
+    
+    def draw(self):
+        stroke(0, 0, 0, 50)
+        for i, n1 in enumerate(self.nodes):
+            for j, n2 in enumerate(self.nodes):
+                avg_p = sum(self.mc[p][i][j] for p in range(num_percepts)) / num_percepts
+                p = self.mc[self.dominant_percept(i)][i][j]
+                if p < 0.1:
+                    continue
+                strokeWeight(p * 10)
+                line(n1.pos.x, n1.pos.y, n2.pos.x, n2.pos.y)
+        
+        for i, node in enumerate(self.nodes):
+            node.draw(i == self.state, self.dominant_percept(i))
+    
 class Node:
     def __init__(self):
-        self.percept_visits = [0] * num_percepts
-        self.edges = defaultdict(list)
-        
-        # for visualization
         self.pos = Vec(random(width), random(height))
         self.vel = Vec(0, 0)
 
-    def update(self):
+    def update(self, edges, ps):
         self.vel = self.vel + (Vec(width / 2, height / 2) - self.pos) * 0.001
-        
-        for p in range(num_percepts):
-            for node, _ in self.edges[p]:
-                delta = node.pos - self.pos
-                k = 0.001 * (delta.mag(1) - 20)
-                force = delta.norm() * k
-                self.vel = self.vel + force
-                node.vel = node.vel - force
-        
-        for node in psm:
+        for p, node in zip(ps, edges):
+            if p < 2.0 / num_percepts:
+                continue 
             delta = node.pos - self.pos
-            k = -200  / (delta.mag(1) ** 2)
+            k = 0
+            if p > 2.0 / num_percepts: #((len(ps) - 1) / len(ps)):
+                k = 0.1 * (delta.mag(1) - 100)
+            else:
+                k = -100.0 / (delta.mag(1)**2)
             force = delta.norm() * k
             self.vel = self.vel + force
             node.vel = node.vel - force
 
-        self.vel = self.vel * 0.8
+        self.vel = self.vel * 0.1
         self.pos = self.pos + self.vel
 
-        
-    def dominant_percept(self):
-        return sorted(enumerate(self.percept_visits), key=lambda x: x[1])[-1][0]
-    
-    def visits(self):
-        return sum(self.percept_visits)
-
-    def draw(self):
-        for p in range(num_percepts):
-            c = percept_colors[p]
-            stroke(c)
-            for node, prob in self.edges[p]:
-                strokeWeight(prob * 10)
-                line(self.pos.x, self.pos.y, node.pos.x, node.pos.y)
-        
-        noFill()
-        if self in active_states:
+    def draw(self, current_state, dom_percept):
+        fill(255)
+        if current_state:
             strokeWeight(5)
         else:
             strokeWeight(1)
@@ -89,127 +155,47 @@ class Node:
         ellipse(self.pos.x, self.pos.y, 20, 20)
         
         fill(0);
-        text(str(self.dominant_percept()), self.pos.x - 2, self.pos.y + 5)
+        #text(str(dom_percept), self.pos.x - 2, self.pos.y + 5)
 
-psm = []
+mc = None
 active_states = []
 percept_history = []
 history_states = [] # [[(start_state, end_state, percept)]]
-actual_histories = [] # [[percept]]
-
-def normalize(dist):
-    total = sum(dist)
-    for i, p in enumerate(dist):
-        dist[i] = p / total
-
-def normalize_edges(edges):
-    for i in range(len(edges)):
-        s, p = edges[i]
-        edges[i] = (s, max(0.001, p))
-    total_p = sum([p for _, p in edges])
-    for i in range(len(edges)):
-        s, p = edges[i]
-        edges[i] = (s, p / total_p)
-        
-        
-def activation(x, a, b):
-    return atan(x / a - b) / pi + 1/2
-
-def sample(distribution):
-    rv = random(1)
-
-    cum_p = 0
-    for node, p in sorted(distribution, key=lambda x: x[1], reverse=True):
-        cum_p += p
-        if rv < cum_p:
-            return node
-    raise Exception("dist doesn't sum to 1: {}".format(str(dist)))
-
-def backpropagate(node, history_states):
-    dom_percept = node.dominant_percept()
-    actual_percept = percept_history[-1]
-    bump = 1 if dom_percept == actual_percept else -0.1
-    i = 1
-    for start_state, end_state, percept in reversed(history_states):
-        edges = start_state.edges[percept]
-        for index, e in enumerate(edges):
-            next_state, p = e
-            if next_state == end_state:
-                edges[index] = (next_state, p + bump / (i ** 2))
-                break
-        normalize_edges(edges)
-        i += 1
-
-def transition(node, p, actual_history, history_states):
-    actual_history.append(node.dominant_percept())
-    
-    node.percept_visits[p] += 1
-    backpropagate(node, history_states)
-    edges = node.edges[p]
-    
-    if edges == []:
-        random_node = psm[int(random(len(psm)))]
-        edges.append((random_node, 1))
-    next_node = sample(edges)
-
-    confidence = activation(node.visits(), num_percepts, 5)
-    mean = node.visits() / num_percepts
-    sd = 0
-    for p_v in node.percept_visits:
-        sd += (p_v - mean) **2
-    sd = sqrt(sd / num_percepts)
-    
-    rv = random(1)
-    pvalue = sd / max(node.percept_visits)
-    
-    if rv * confidence > pvalue:
-        if random(1) > activation(len(edges), 1, - 1) and len(edges) < len(psm):
-            choices = [
-                n for n in psm if all(e != n for e, _ in edges)
-            ]
-            next_node = choices[int(random(len(choices)))]
-            edges.append((next_node, 0.5))
-        else:
-            next_node = Node()
-            psm.append(next_node)
-            edges.append((next_node, 0.5))
-        
-        normalize_edges(edges)
-    return next_node
-
+actual_history = [] # [percept]
+percept_count = 0
 
 def setup():
+    global mc
     size(500, 500)
-    psm.append(Node())
-    active_states.append(psm[0])
-    actual_histories.append([])
+    mc = MC(int(num_percepts * 1.5))
     history_states.append([])
 
-def transition_all(p):
-    global active_states
+def transition(p):
+    global percept_history, actual_history, percept_count
+    percept_count += 1
     percept_history.append(p)
-    next_states = []
-    for i, s in enumerate(active_states):
-        next_state = transition(s, p, actual_histories[i], history_states[i])
-        history_states[i].append((s, next_state, p))
-        next_states.append(next_state)
-    active_states = next_states
+    actual_history.append(mc.dominant_percept(mc.state))
+    percept_history = percept_history[-100:]
+    actual_history = actual_history[-100:]
+    mc.transition(p)
     
 def update():
-    t = 10
+    t = 1 #int(10 * (millis() / 20000.0) * (sin(millis() / 10000.0) + 1)) + 1
+    pattern = list(range(num_percepts))
     if frameCount % t == 0:
-        transition_all(int(frameCount / t) % num_percepts)
-    
-    for node in psm:
-        node.update()
+        for i in range(11):
+            p = percept_count % num_percepts
+            transition(p)
+    if keyPressed:
+        mc.update()
 
 
 def draw():
     background(255)
     
     update()
-    for node in psm:
-        node.draw()
+    if keyPressed:
+        mc.draw()
     
     menu()
     
@@ -232,16 +218,7 @@ def menu():
     
     fill(0)
     text(str(percept_history[-30:]), 10, menu_height + 25)
-    hit_rate = sum(float(len([ p1 for p1, p2 in zip(percept_history, hist) if p1 == p2 ])) / max(1, len(percept_history)) for hist in actual_histories) / len(actual_histories)
+    recent_history = percept_history[-100:]
+    hit_rate = float(len([ p1 for p1, p2 in zip(recent_history, actual_history[-len(recent_history):]) if p1 == p2 ])) / max(1, len(recent_history))
     text(str(hit_rate), 10, menu_height + 50)
-    
-    for i, hist in enumerate(actual_histories):
-        text(str(hist[-30:]), 10, menu_height + 75 + 25 * i)
-    
-    
-        
-    
-    
-    
-        
-        
+    text(str(actual_history[-30:]), 10, menu_height + 75)        
